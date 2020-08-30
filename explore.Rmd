@@ -1,0 +1,267 @@
+---
+title: "Untitled"
+author: "jbot"
+date: "15-7-2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE)
+```
+
+```{r}
+#install.packages("devtools")
+#library("devtools")
+#install_github("vda-lab/stad")
+```
+
+```{r}
+library(stad)
+library(ggplot2)
+library("pheatmap")
+library("RColorBrewer")
+```
+# Tutorial 
+
+```{r}
+# Circles dataset
+data(circles)
+
+ggplot(circles, aes(x,y, color = lens)) +
+  geom_point()
+```
+
+## heatmap of correlation matrix
+
+```{r}
+circles_distance <- dist(circles[,c("x", "y")])
+
+sampleDistMatrix <- as.matrix( circles_distance )
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows = circles_distance,
+         clustering_distance_cols = circles_distance,
+         col = colors)
+
+```
+
+## STAD without lens
+
+```{r, cache = TRUE}
+set.seed(10)
+circles_nolens <- stad(circles_distance)
+plot_graph(circles_nolens, layout = igraph::layout_with_kk )
+```
+
+## STAD with lens
+
+```{r}
+set.seed(10)
+circles_lens <- stad(circles_distance, filter_values = circles$lens, num_intervals = 5)
+plot_graph(circles_lens, layout = igraph::layout_with_kk )
+```
+
+```{r}
+circles_lens <- stad(circles_distance, filter_values = circles$lens, num_intervals = 5)
+plot_graph(circles_lens, layout = igraph::layout_with_mds )
+```
+
+# Iris data set
+
+Different colors show the three species in the iris dataset
+
+Is there a way to add a legend?
+
+## Default graph layout (nicely)
+
+```{r}
+# Iris dataset
+data(iris)
+iris_data = iris[, grep("Sepal|Petal", colnames(iris))]
+iris_labels = iris[, "Species"]
+iris_distance <- dist(iris_data)
+
+set.seed(111)
+iris_stad <- stad(iris_distance)
+plot_graph(iris_stad, vertex.color = iris_labels)
+```
+
+## Layout with kk
+
+```{r}
+plot_graph(iris_stad, vertex.color = iris_labels, layout = igraph::layout_with_kk)
+```
+
+## Layout with mds
+
+```{r}
+plot_graph(iris_stad, vertex.color = iris_labels, layout = igraph::layout_with_mds)
+```
+
+STAD seems to work well with the iris dataset. 
+
+## compare with UMAP
+similar to layout with kk
+
+layout with mds has 2 clear arms for versicolor. versicolor has 2 clusters in umap 
+
+```{r}
+library(umap)
+iris_umap = umap(iris_data)
+umap_coord = cbind(as.data.frame(iris_umap$layout), iris_labels)
+
+umap_coord %>%
+  ggplot(aes(x = V1, y = V2, color = iris_labels))+
+    geom_point() +
+    coord_fixed()
+```
+
+## Compare with t-SNE
+
+```{r, cache = TRUE}
+library(tsne)
+iris_tsne = tsne(X = iris_distance)
+
+iris_tsne %>%
+  as.data.frame() %>%
+  cbind(iris_labels) %>%
+  ggplot(aes(x = V1, y = V2, color = iris_labels))+
+    geom_point() +
+    coord_fixed()
+```
+
+# Single cell data
+
+## Quickstart workflow from https://osca.bioconductor.org/
+
+```{r}
+#BiocManager::install("scRNAseq")
+#BiocManager::install("scater")
+#BiocManager::install("scran")
+#BiocManager::install("uwot")
+library(scRNAseq)
+library(scater)
+```
+
+```{r, cache = TRUE}
+#1977 cells of human embryo mid brain from La Manno et al. (2016)
+sce <- LaMannoBrainData('human-embryo')
+
+# Quality control.
+is.mito <- grepl("^MT-", rownames(sce))
+qcstats <- perCellQCMetrics(sce, subsets=list(Mito=is.mito))
+filtered <- quickPerCellQC(qcstats, percent_subsets="subsets_Mito_percent")
+sce <- sce[, !filtered$discard]
+
+# Normalization.
+sce <- logNormCounts(sce)
+
+# Feature selection.
+library(scran)
+dec <- modelGeneVar(sce)
+hvg <- getTopHVGs(dec, prop=0.1)
+
+# Dimensionality reduction.
+set.seed(1234)
+sce <- runPCA(sce, ncomponents=25, subset_row=hvg)
+sce <- runUMAP(sce, dimred = 'PCA', external_neighbors=TRUE)
+
+# Clustering.
+g <- buildSNNGraph(sce, use.dimred = 'PCA')
+colLabels(sce) <- factor(igraph::cluster_louvain(g)$membership)
+
+# Visualization.
+plotUMAP(sce, colour_by="label")
+```
+
+## Try STAD
+Run on PCA, first 25 principle components. 
+Also try on raw data?
+
+```{r, cache = TRUE}
+pca_sce = as.data.frame(reducedDim(sce, "PCA"))
+
+pca_distance <- dist(pca_sce)
+
+set.seed(111)
+#sce_stad <- stad(pca_distance)
+# Error: Can't join on `x$from` x `y$from` because of incompatible types. i `x$from` is of type <factor<91338>>>. i `y$from` is of type <double>>.
+
+#running on only 100 rows did not solve the problem
+#error because rownames are not numbers?
+
+rownames(pca_sce) <- c(1:nrow(pca_sce))
+pca_distance <- dist(pca_sce)
+
+set.seed(111)
+sce_stad <- stad(pca_distance)
+
+plot_graph(sce_stad, vertex.color = colLabels(sce))
+```
+
+## KK layout
+
+```{r, cache = TRUE}
+plot_graph(sce_stad, layout = igraph::layout_with_kk, vertex.color = colLabels(sce))
+```
+
+## MDS
+
+```{r, cache = TRUE}
+plot_graph(sce_stad, layout = igraph::layout_with_mds, vertex.color = colLabels(sce))
+```
+
+## Trace
+
+```{r, cache = TRUE}
+plot_trace(sce_stad)
+```
+
+## Col by gene expression
+
+```{r}
+log_counts <- assay(sce, "logcounts")
+log_counts <- t(log_counts)
+log_counts <- as.data.frame(log_counts)
+```
+
+## SOX2
+
+SOX2 is predominantly expressed in immature and undifferentiated cells of the neural epithelium of the entire central nervous system
+
+```{r, cache = TRUE}
+plot_graph(sce_stad, layout = igraph::layout_with_kk, vertex.color = log_counts$SOX2)
+```
+
+```{r}
+# Visualization.
+plotUMAP(sce, colour_by="SOX2")
+```
+
+## STMN2
+
+```{r, cache = TRUE}
+plot_graph(sce_stad, layout = igraph::layout_with_kk, vertex.color = log_counts$STMN2)
+```
+
+```{r}
+# Visualization.
+plotUMAP(sce, colour_by="STMN2")
+```
+
+## NES
+
+Marker for neural stem cells
+
+```{r, cache = TRUE}
+plot_graph(sce_stad, layout = igraph::layout_with_kk, vertex.color = log_counts$NES)
+```
+
+
+```{r}
+# Visualization.
+plotUMAP(sce, colour_by="NES")
+```
+
